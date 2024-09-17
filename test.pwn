@@ -54,19 +54,27 @@ stock LightThrowError(E_LIGHT_ERROR:error, {Float,_}:...) {
     }
 }
 
-native_addi(const parms[]) {
-    new result = parms[0] + parms[1];
+native_SetPlayerPos(const parms[]) {
+    new playerid = parms[0];
+    new Float:x = float(parms[1]);
+    new Float:y = float(parms[2]);
+    new Float:z = float(parms[3]);
 
-    printf("addi: %d + %d = %d", parms[0], parms[1], result);
+    printf(
+        "SetPlayerPos(%d, %f, %f, %f);",
+        playerid, x, y, z
+    );
 
-    return result;
+    SetPlayerPos(playerid, x, y, z);
+
+    return 0;
 }
 
 main() {
     new byteCode[32];
 
-    LightRegisterNative("addi", __addressof(native_addi), 2);
+    LightRegisterNative("SetPlayerPos", __addressof(native_SetPlayerPos), 4);
     
-    if (LightCompile("@addi(10, 5);", byteCode))
+    if (LightCompile("$x = 1; $y = 2; $z = 3; @SetPlayerPos(0, $x, $y, $z);", byteCode))
         printf("Program result: %d", LightExecute(byteCode));
 }
