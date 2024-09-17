@@ -26,29 +26,26 @@ static const TOKEN_NAME[][] = {
 
 stock LightThrowError(E_LIGHT_ERROR:error, {Float,_}:...) {
     switch (error) {
-        case LIGHT_ERROR_EXPECT_IDENT:
-            printf("expected a identifier, but found: %s", TOKEN_NAME[getarg(2)]);
-
         case LIGHT_ERROR_EXPECT_BUT_FOUND:
-            printf("expected: %s, but found: %s", TOKEN_NAME[getarg(2)], TOKEN_NAME[getarg(3)]);
+            printf("ERROR: expected: `%s`, but found: `%s`.", TOKEN_NAME[getarg(1)], TOKEN_NAME[getarg(2)]);
 
         case LIGHT_ERROR_INVALID_EXPR:
-            printf("invalid expression");
+            printf("ERROR: invalid expression.");
 
         case LIGHT_ERROR_INVALID_STMT:
-            printf("invalid statement");
+            printf("ERROR: invalid statement.");
 
         case LIGHT_ERROR_LIGHT_MAX_VARS:
-            printf("max number of variables reached, cannot create new one");
+            printf("ERROR: max number of variables reached, cannot create new one.");
 
         case LIGHT_ERROR_VAR_NOT_FOUND:
-            printf("variable not found");
+            printf("ERROR: variable not found.");
 
         case LIGHT_ERROR_NATIVE_NOT_FOUND:
-            printf("native function not found");
+            printf("ERROR: native function not found.");
 
         case LIGHT_ERROR_CALL_NUM_ARGS:
-            printf("number of arguments does not match definition");
+            printf("ERROR: number of arguments does not match definition.");
 
         default: {}
     }
@@ -65,7 +62,7 @@ native_SetPlayerPos(const parms[]) {
         playerid, x, y, z
     );
 
-    SetPlayerPos(playerid, x, y, z);
+    // SetPlayerPos(playerid, x, y, z);
 
     return 0;
 }
@@ -74,7 +71,13 @@ main() {
     new byteCode[32];
 
     LightRegisterNative("SetPlayerPos", __addressof(native_SetPlayerPos), 4);
-    
+
     if (LightCompile("$x = 1; $y = 2; $z = 3; @SetPlayerPos(0, $x, $y, $z);", byteCode))
+        printf("Program result: %d", LightExecute(byteCode));
+
+    if (LightCompile("$x = $foo;", byteCode))
+        printf("Program result: %d", LightExecute(byteCode));
+
+    if (LightCompile("1 + 2 * 3;", byteCode))
         printf("Program result: %d", LightExecute(byteCode));
 }

@@ -35,7 +35,6 @@ stock LightThrowError(E_LIGHT_ERROR:error, {Float,_}:...);
 
 enum E_LIGHT_ERROR {
     LIGHT_ERROR_NONE,
-    LIGHT_ERROR_EXPECT_IDENT,
     LIGHT_ERROR_EXPECT_BUT_FOUND,
     LIGHT_ERROR_INVALID_EXPR,
     LIGHT_ERROR_INVALID_STMT,
@@ -375,7 +374,7 @@ static stock E_FLOW_STATE:ParserCall(byteCode[], &byteCodeLength) {
     LexerAdvance();
 
     if (s_LexerToken != LIGHT_TOKEN_IDENTIFIER) {
-        LightThrowError(LIGHT_ERROR_EXPECT_IDENT, s_LexerToken);
+        LightThrowError(LIGHT_ERROR_EXPECT_BUT_FOUND, LIGHT_TOKEN_IDENTIFIER, s_LexerToken);
         return FLOW_STATE_HALT;
     }
 
@@ -424,7 +423,7 @@ static stock E_FLOW_STATE:ParserVariableAssign(byteCode[], &byteCodeLength) {
     LexerAdvance();
 
     if (s_LexerToken != LIGHT_TOKEN_IDENTIFIER) {
-        LightThrowError(LIGHT_ERROR_EXPECT_IDENT, s_LexerToken);
+        LightThrowError(LIGHT_ERROR_EXPECT_BUT_FOUND, LIGHT_TOKEN_IDENTIFIER, s_LexerToken);
         return FLOW_STATE_HALT;
     }
 
@@ -469,7 +468,7 @@ static stock E_FLOW_STATE:ParserExpr(byteCode[], &byteCodeLength, minPrecedence)
         LexerAdvance();
 
         if (s_LexerToken != LIGHT_TOKEN_IDENTIFIER) {
-            LightThrowError(LIGHT_ERROR_EXPECT_IDENT, s_LexerToken);
+            LightThrowError(LIGHT_ERROR_EXPECT_BUT_FOUND, LIGHT_TOKEN_IDENTIFIER, s_LexerToken);
             return FLOW_STATE_HALT;
         }
 
