@@ -70,27 +70,29 @@ static stock HashStringUTF8(const string[]) {
 static stock CallFunctionFromAddr(fnAddress, ...) {
     #pragma unused fnAddress
 
-    // Get the return address and save it into FRM.
-    __emit pop.pri;
-    __emit sctrl 5;
+    static returnAddress;
+
+    // Get the return address.
+    #emit POP.PRI
+    #emit STOR.PRI returnAddress
 
     // Get the arguments size, subtract 4 (one cell) and save the result into PRI.
-    __emit pop.pri;
-    __emit add.c -4;
+    #emit POP.PRI
+    #emit ADD.C -4
 
     // Pop `fnAddress` into ALT.
-    __emit pop.alt;
+    #emit POP.ALT
 
     // Push the arguments size.
-    __emit push.pri;
+    #emit PUSH.PRI
 
     // Push the return address.
-    __emit lctrl 5;
-    __emit push.pri;
+    #emit LOAD.PRI returnAddress
+    #emit PUSH.PRI
 
     // Move the value of PRI (`fnAddress`) to CIP.
-    __emit move.pri;
-    __emit sctrl 6;
+    #emit MOVE.PRI
+    #emit SCTRL 6
 
     // Avoid the warning 209.
     // "function ... should return a value"
@@ -109,13 +111,26 @@ enum {
     LIGHT_TOKEN_MINUS,    ///< -
     LIGHT_TOKEN_STAR,     ///< *
     LIGHT_TOKEN_SLASH,    ///< /
+    LIGHT_TOKEN_PERCENT,  ///< %
     LIGHT_TOKEN_AT,       ///< @
     LIGHT_TOKEN_DOLLAR,   ///< $
     LIGHT_TOKEN_SEMI,     ///< ;
     LIGHT_TOKEN_EQ,       ///< =
     LIGHT_TOKEN_LPAR,     ///< (
     LIGHT_TOKEN_RPAR,     ///< )
+    LIGHT_TOKEN_LBRACE,   ///< {
+    LIGHT_TOKEN_RBRACE,   ///< }
     LIGHT_TOKEN_COMMA,    ///< ,
+    LIGHT_TOKEN_EQEQ,     ///< ==
+    LIGHT_TOKEN_LT,       ///< <
+    LIGHT_TOKEN_LE,       ///< <=
+    LIGHT_TOKEN_GT,       ///< >
+    LIGHT_TOKEN_GE,       ///< >=
+    LIGHT_TOKEN_LTGT,     ///< <>
+
+    LIGHT_KEYWORD_IF,
+    LIGHT_KEYWORD_ELSE,
+    LIGHT_KEYWORD_WHILE,
 }
 
 static stock s_LexerCode[LIGHT_MAX_CODE_LENGTH];
@@ -159,19 +174,57 @@ static stock LexerSkipWhitespace() {
     }
 }
 
-static stock bool:LexerParseOneCharToken(&token) {
+static stock bool:LexerParsePuntuaction(&token) {
     switch (s_LexerCode[s_LexerCodeIndex]) {
+        case '@': token = LIGHT_TOKEN_AT;
+        case '$': token = LIGHT_TOKEN_DOLLAR;
+
         case '+': token = LIGHT_TOKEN_PLUS;
         case '-': token = LIGHT_TOKEN_MINUS;
         case '*': token = LIGHT_TOKEN_STAR;
         case '/': token = LIGHT_TOKEN_SLASH;
-        case '@': token = LIGHT_TOKEN_AT;
-        case '$': token = LIGHT_TOKEN_DOLLAR;
-        case '=': token = LIGHT_TOKEN_EQ;
-        case ';': token = LIGHT_TOKEN_SEMI;
+        case '%': token = LIGHT_TOKEN_PERCENT;
+
+        case '=': {
+            if (s_LexerCode[s_LexerCodeIndex + 1] == '=') {
+                ++s_LexerCodeIndex;
+                token = LIGHT_TOKEN_EQEQ;
+            }
+            else {
+                token = LIGHT_TOKEN_EQ;
+            }
+        }
+
         case '(': token = LIGHT_TOKEN_LPAR;
         case ')': token = LIGHT_TOKEN_RPAR;
+        case '{': token = LIGHT_TOKEN_LBRACE;
+        case '}': token = LIGHT_TOKEN_RBRACE;
+        case ';': token = LIGHT_TOKEN_SEMI;
         case ',': token = LIGHT_TOKEN_COMMA;
+
+        case '<': {
+            if (s_LexerCode[s_LexerCodeIndex + 1] == '=') {
+                ++s_LexerCodeIndex;
+                token = LIGHT_TOKEN_LE;
+            }
+            else if (s_LexerCode[s_LexerCodeIndex + 1] == '>') {
+                ++s_LexerCodeIndex;
+                token = LIGHT_TOKEN_LTGT;
+            }
+            else {
+                token = LIGHT_TOKEN_LT;
+            }
+        }
+
+        case '>': {
+            if (s_LexerCode[s_LexerCodeIndex + 1] == '=') {
+                ++s_LexerCodeIndex;
+                token = LIGHT_TOKEN_GE;
+            }
+            else {
+                token = LIGHT_TOKEN_GT;
+            }
+        }
 
         default:
             return false;
@@ -227,7 +280,7 @@ static stock bool:LexerAdvance() {
         return false;
     }
 
-    if (LexerParseOneCharToken(s_LexerToken))
+    if (LexerParsePuntuaction(s_LexerToken))
         return true;
 
     if (LexerParseNumber(s_LexerNumber)) {
@@ -236,7 +289,14 @@ static stock bool:LexerAdvance() {
     }
 
     if (LexerParseIdentifier()) {
-        s_LexerToken = LIGHT_TOKEN_IDENTIFIER;
+        switch (s_LexerIdentifierHash) {
+            case 959999494: s_LexerToken = LIGHT_KEYWORD_IF;
+            case -1111532560: s_LexerToken = LIGHT_KEYWORD_ELSE;
+            case 231090382: s_LexerToken = LIGHT_KEYWORD_WHILE;
+            // case -1393327216: s_LexerToken = LIGHT_KEYWORD_FOR;
+            default: s_LexerToken = LIGHT_TOKEN_IDENTIFIER;
+        }
+
         return true;
     }
 
@@ -334,40 +394,150 @@ static stock NativeGet(hash) {
 /* -------------------------------- Parser & ByteCode Builder --------------------------------  */
 
 static enum {
-    OPCODE_HALT,        ///< Halts the program executation.
-    OPCODE_CONST,       ///< Pushes a constant value onto the stack.
-    OPCODE_SYS,         ///< Calls a native function and pushes the return value onto the stack.
-    OPCODE_GET,         ///< Gets the value of a variable.
-    OPCODE_SET,         ///< Sets the value of a variable.
-
-    /// # Binary Operations
-    /// These instructions pop 2 cells from the stack, perform the operation
-    /// and push the result onto the stack.
-
+    OPCODE_HALT,
+    OPCODE_CONST,
+    OPCODE_GET,
+    OPCODE_SYS,
+    OPCODE_SET,
     OPCODE_ADD,
     OPCODE_SUB,
     OPCODE_MUL,
     OPCODE_DIV,
+    OPCODE_REM,
+    OPCODE_EQ,
+    OPCODE_NE,
+    OPCODE_LT,
+    OPCODE_GT,
+    OPCODE_JZ,
+    OPCODE_JMP,
+    OPCODE_LE,
+    OPCODE_GE,
 }
 
 static const stock PRECEDENCE_TABLE[] = {
-    0,  // LIGHT_TOKEN_EOF
-    0,  // LIGHT_TOKEN_IDENTIFIER
-    0,  // LIGHT_TOKEN_NUMBER
-    1,  // LIGHT_TOKEN_PLUS
-    1,  // LIGHT_TOKEN_MINUS
-    2,  // LIGHT_TOKEN_STAR
-    2,  // LIGHT_TOKEN_SLASH
-    0,  // LIGHT_TOKEN_AT
-    0,  // LIGHT_TOKEN_DOLLAR
-    0,  // LIGHT_TOKEN_SEMI
-    0,  // LIGHT_TOKEN_EQ
-    0,  // LIGHT_TOKEN_LPAR
-    0,  // LIGHT_TOKEN_RPAR
-    0   // LIGHT_TOKEN_COMMA
+    0, // LIGHT_TOKEN_EOF
+    0, // LIGHT_TOKEN_IDENTIFIER
+    0, // LIGHT_TOKEN_NUMBER
+
+    2, // LIGHT_TOKEN_PLUS
+    2, // LIGHT_TOKEN_MINUS
+    3, // LIGHT_TOKEN_STAR
+    3, // LIGHT_TOKEN_SLASH
+    3, // LIGHT_TOKEN_PERCENT
+    0, // LIGHT_TOKEN_AT
+    0, // LIGHT_TOKEN_DOLLAR
+    0, // LIGHT_TOKEN_SEMI
+    1, // LIGHT_TOKEN_EQ
+    0, // LIGHT_TOKEN_LPAR
+    0, // LIGHT_TOKEN_RPAR
+    0, // LIGHT_TOKEN_LBRACE
+    0, // LIGHT_TOKEN_RBRACE
+    0, // LIGHT_TOKEN_COMMA
+    1, // LIGHT_TOKEN_EQEQ
+    1, // LIGHT_TOKEN_LT
+    1, // LIGHT_TOKEN_LE
+    1, // LIGHT_TOKEN_GT
+    1, // LIGHT_TOKEN_GE
+    1, // LIGHT_TOKEN_LTGT
+    0, // LIGHT_KEYWORD_IF
+    0, // LIGHT_KEYWORD_ELSE
+    0, // LIGHT_KEYWORD_WHILE
 };
 
 static stock E_FLOW_STATE:ParserExpr(byteCode[], &byteCodeLength, minPrecedence);
+static stock E_FLOW_STATE:ParserStmt(byteCode[], &byteCodeLength);
+
+static stock E_FLOW_STATE:ParserIf(byteCode[], &byteCodeLength) {
+    // IF:
+    //     CONST 0
+    //     CONST 0
+    //     EQ
+    //     JZ IF_ELSE
+    //     ...
+    //     JMP IF_END
+    // IF_ELSE:
+    //     ...
+    // IF_END:
+    //     ...
+
+    LexerAdvance();
+
+    new byteCodeLenPrevCondition = byteCodeLength;
+
+    PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_LPAR));
+    PROPAGATE_FLOW_STATE(ParserExpr(byteCode, byteCodeLength, 1));
+    PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_RPAR));
+
+    // if () ?
+    if (byteCodeLength == byteCodeLenPrevCondition) {
+        LightThrowError(LIGHT_ERROR_INVALID_STMT, s_LexerIdentifier);
+        return FLOW_STATE_HALT;
+    }
+
+    new jumpIfFalseInstructionOffset = byteCodeLength;
+    byteCodeLength += 2;
+
+    PROPAGATE_FLOW_STATE(ParserStmt(byteCode, byteCodeLength));
+
+    if (s_LexerToken == LIGHT_KEYWORD_ELSE) {
+        LexerAdvance();
+
+        new jumpIfTrueInstructionOffset = byteCodeLength;
+        byteCodeLength += 2;
+
+        byteCode[jumpIfFalseInstructionOffset] = OPCODE_JZ;
+        byteCode[jumpIfFalseInstructionOffset + 1] = byteCodeLength;
+
+        PROPAGATE_FLOW_STATE(ParserStmt(byteCode, byteCodeLength));
+
+        byteCode[jumpIfTrueInstructionOffset] = OPCODE_JMP;
+        byteCode[jumpIfTrueInstructionOffset + 1] = byteCodeLength;
+    }
+    else {
+        byteCode[jumpIfFalseInstructionOffset] = OPCODE_JZ;
+        byteCode[jumpIfFalseInstructionOffset + 1] = byteCodeLength;
+    }
+
+    return FLOW_STATE_CONTINUE;
+}
+
+static stock E_FLOW_STATE:ParserWhile(byteCode[], &byteCodeLength) {
+    // WHILE:
+    //     CONST 0
+    //     CONST 0
+    //     EQ
+    //     JZ WHILE_END
+    // WHILE_END:
+    //     ...
+
+    LexerAdvance();
+
+    new byteCodeLenPrevCondition = byteCodeLength;
+    new condCheckInstructionOffset = byteCodeLength;
+
+    PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_LPAR));
+    PROPAGATE_FLOW_STATE(ParserExpr(byteCode, byteCodeLength, 1));
+    PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_RPAR));
+
+    // while () ?
+    if (byteCodeLength == byteCodeLenPrevCondition) {
+        LightThrowError(LIGHT_ERROR_INVALID_STMT, s_LexerIdentifier);
+        return FLOW_STATE_HALT;
+    }
+
+    new jumpIfFalseInstructionOffset = byteCodeLength;
+    byteCodeLength += 2;
+
+    PROPAGATE_FLOW_STATE(ParserStmt(byteCode, byteCodeLength));
+
+    byteCode[byteCodeLength++] = OPCODE_JMP;
+    byteCode[byteCodeLength++] = condCheckInstructionOffset;
+
+    byteCode[jumpIfFalseInstructionOffset] = OPCODE_JZ;
+    byteCode[jumpIfFalseInstructionOffset + 1] = byteCodeLength;
+
+    return FLOW_STATE_CONTINUE;
+}
 
 static stock E_FLOW_STATE:ParserCall(byteCode[], &byteCodeLength) {
     // Eat @
@@ -510,6 +680,14 @@ static stock E_FLOW_STATE:ParserExpr(byteCode[], &byteCodeLength, minPrecedence)
             case LIGHT_TOKEN_MINUS: byteCode[byteCodeLength++] = OPCODE_SUB;
             case LIGHT_TOKEN_STAR: byteCode[byteCodeLength++] = OPCODE_MUL;
             case LIGHT_TOKEN_SLASH: byteCode[byteCodeLength++] = OPCODE_DIV;
+            case LIGHT_TOKEN_PERCENT: byteCode[byteCodeLength++] = OPCODE_REM;
+
+            case LIGHT_TOKEN_EQEQ: byteCode[byteCodeLength++] = OPCODE_EQ;
+            case LIGHT_TOKEN_LTGT: byteCode[byteCodeLength++] = OPCODE_NE;
+            case LIGHT_TOKEN_LT: byteCode[byteCodeLength++] = OPCODE_LT;
+            case LIGHT_TOKEN_GT: byteCode[byteCodeLength++] = OPCODE_GT;
+            case LIGHT_TOKEN_LE: byteCode[byteCodeLength++] = OPCODE_LE;
+            case LIGHT_TOKEN_GE: byteCode[byteCodeLength++] = OPCODE_GE;
         }
 
         precedence = PRECEDENCE_TABLE[s_LexerToken];
@@ -519,14 +697,33 @@ static stock E_FLOW_STATE:ParserExpr(byteCode[], &byteCodeLength, minPrecedence)
 }
 
 static stock E_FLOW_STATE:ParserStmt(byteCode[], &byteCodeLength) {
-    if (s_LexerToken == LIGHT_TOKEN_DOLLAR) {
-        PROPAGATE_FLOW_STATE(ParserVariableAssign(byteCode, byteCodeLength));
-    }
-    else {
-        PROPAGATE_FLOW_STATE(ParserExpr(byteCode, byteCodeLength, 1));
-    }
+    switch (s_LexerToken) {
+        case LIGHT_TOKEN_DOLLAR: {
+            PROPAGATE_FLOW_STATE(ParserVariableAssign(byteCode, byteCodeLength));
+            PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_SEMI));
+        }
 
-    PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_SEMI));
+        case LIGHT_KEYWORD_IF:
+            PROPAGATE_FLOW_STATE(ParserIf(byteCode, byteCodeLength));
+
+        case LIGHT_KEYWORD_WHILE:
+            PROPAGATE_FLOW_STATE(ParserWhile(byteCode, byteCodeLength));
+
+        case LIGHT_TOKEN_LBRACE: {
+            LexerAdvance();
+
+            while (s_LexerToken != LIGHT_TOKEN_RBRACE) {
+                PROPAGATE_FLOW_STATE(ParserStmt(byteCode, byteCodeLength));
+            }
+
+            LexerAdvance();
+        }
+
+        default: {
+            PROPAGATE_FLOW_STATE(ParserExpr(byteCode, byteCodeLength, 2));
+            PROPAGATE_FLOW_STATE(LexerMatch(LIGHT_TOKEN_SEMI));
+        }
+    }
 
     return FLOW_STATE_CONTINUE;
 }
@@ -561,11 +758,11 @@ stock LightExecute(const byteCode[]) {
         new opcode = byteCode[ip++];
 
         switch (opcode) {
-            case OPCODE_HALT:
-                break;
-
             case OPCODE_CONST:
                 stack[sp++] = byteCode[ip++];
+
+            case OPCODE_GET:
+                stack[sp++] = LightVariableGetValue(byteCode[ip++]);
 
             case OPCODE_SYS: {
                 new nativeIndex = byteCode[ip++];
@@ -579,9 +776,6 @@ stock LightExecute(const byteCode[]) {
 
                 ++sp;
             }
-
-            case OPCODE_GET:
-                stack[sp++] = LightVariableGetValue(byteCode[ip++]);
 
             case OPCODE_SET:
                 LightVariableSetValue(byteCode[ip++], stack[--sp]);
@@ -605,11 +799,134 @@ stock LightExecute(const byteCode[]) {
                 --sp;
                 stack[sp - 1] /= stack[sp];
             }
+
+            case OPCODE_REM: {
+                --sp;
+                stack[sp - 1] %= stack[sp];
+            }
+
+            case OPCODE_EQ: {
+                --sp;
+                stack[sp - 1] = stack[sp - 1] == stack[sp];
+            }
+
+            case OPCODE_NE: {
+                --sp;
+                stack[sp - 1] = stack[sp - 1] != stack[sp];
+            }
+
+            case OPCODE_LT: {
+                --sp;
+                stack[sp - 1] = stack[sp - 1] < stack[sp];
+            }
+
+            case OPCODE_GT: {
+                --sp;
+                stack[sp - 1] = stack[sp - 1] > stack[sp];
+            }
+
+            case OPCODE_JZ: {
+                ++ip;
+
+                if (stack[--sp] == 0)
+                    ip = byteCode[ip - 1];
+            }
+
+            case OPCODE_JMP:
+                ip = byteCode[ip];
+
+            case OPCODE_LE: {
+                --sp;
+                stack[sp - 1] = stack[sp - 1] <= stack[sp];
+            }
+
+            case OPCODE_GE: {
+                --sp;
+                stack[sp - 1] = stack[sp - 1] >= stack[sp];
+            }
+
+            case OPCODE_HALT:
+                break;
+
+            default:
+                return -1; // invalid opcode
         }
     }
 
     if (sp > 0)
         return stack[sp - 1];
+
+    return 0;
+}
+
+stock LightDisAsm(const byteCode[]) {
+    new ip;
+
+    for (;;) {
+        new instAddr = ip;
+        new opcode = byteCode[ip++];
+
+        switch (opcode) {
+            case OPCODE_CONST:
+                printf("%d\t|\tCONST %d", instAddr, byteCode[ip++]);
+
+            case OPCODE_GET:
+                printf("%d\t|\tGET %d", instAddr, byteCode[ip++]);
+
+            case OPCODE_SYS:
+                printf("%d\t|\tSYS %d", instAddr, byteCode[ip++]);
+
+            case OPCODE_SET:
+                printf("%d\t|\tSET %d", instAddr, byteCode[ip++]);
+
+            case OPCODE_ADD:
+                printf("%d\t|\tADD", instAddr);
+
+            case OPCODE_SUB:
+                printf("%d\t|\tSUB", instAddr);
+
+            case OPCODE_MUL:
+                printf("%d\t|\tMUL", instAddr);
+
+            case OPCODE_DIV:
+                printf("%d\t|\tDIV", instAddr);
+
+            case OPCODE_REM:
+                printf("%d\t|\tREM", instAddr);
+
+            case OPCODE_EQ:
+                printf("%d\t|\tEQ", instAddr);
+
+            case OPCODE_NE:
+                printf("%d\t|\tNE", instAddr);
+
+            case OPCODE_LT:
+                printf("%d\t|\tLT", instAddr);
+
+            case OPCODE_GT:
+                printf("%d\t|\tGT", instAddr);
+
+            case OPCODE_JZ:
+                printf("%d\t|\tJZ %d", instAddr, byteCode[ip++]);
+
+            case OPCODE_JMP:
+                printf("%d\t|\tJMP %d", instAddr, byteCode[ip++]);
+
+            case OPCODE_LE:
+                printf("%d\t|\tLE", instAddr);
+
+            case OPCODE_GE:
+                printf("%d\t|\tGE", instAddr);
+
+            case OPCODE_HALT: {
+                printf("%d\t|\tHALT", instAddr);
+                break;
+            }
+
+            default:
+                printf("%d\t|\tINVALID_OPCODE %d", instAddr, opcode);
+        }
+    }
 
     return 0;
 }

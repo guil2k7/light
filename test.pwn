@@ -10,18 +10,11 @@ static const TOKEN_NAME[][] = {
     "end of file",
     "identifier",
     "number",
-
-    "+",
-    "-",
-    "*",
-    "/",
-    "@",
-    "$",
-    ";",
-    "=",
-    "(",
-    ")",
-    ","
+    "+", "-", "*", "/", "%",
+    "@", "$", ";", "=",
+    "(", ")", "{", "}", ",",
+    "==", "<", "<=", ">", ">=", "<>",
+    "if", "else", "while"
 };
 
 stock LightThrowError(E_LIGHT_ERROR:error, {Float,_}:...) {
@@ -67,17 +60,39 @@ native_SetPlayerPos(const parms[]) {
     return 0;
 }
 
-main() {
-    new byteCode[32];
+native_PrintNumber(const parms[]) {
+    printf("PrintNumber: %d", parms[0]);
+}
 
+native_Random(const parms[]) {
+    return random(parms[0]);
+}
+
+main() {
+    new byteCode[128];
+    new code[] = \
+    "$x = 0;" \
+    "while ($x < 5) {" \
+    "   @PrintNumber($x);" \
+    "   $x = $x + 1;" \
+    "}" \
+    "$y = @Random(1000);" \
+    "@PrintNumber($y);" \
+    "if ($y % 2 == 0)" \
+    "   @PrintNumber(1111);" \
+    "else" \
+    "   @PrintNumber(2222);" \
+    "";
+
+    LightRegisterNative("PrintNumber", __addressof(native_PrintNumber), 1);
+    LightRegisterNative("Random", __addressof(native_Random), 1);
     LightRegisterNative("SetPlayerPos", __addressof(native_SetPlayerPos), 4);
 
-    if (LightCompile("$x = 1; $y = 2; $z = 3; @SetPlayerPos(0, $x, $y, $z);", byteCode))
-        printf("Program result: %d", LightExecute(byteCode));
+    if (LightCompile(code, byteCode)) {
+        printf("================================ Assembly ================================");
+        LightDisAsm(byteCode);
 
-    if (LightCompile("$x = $foo;", byteCode))
+        printf("================================ Executation ================================");
         printf("Program result: %d", LightExecute(byteCode));
-
-    if (LightCompile("1 + 2 * 3;", byteCode))
-        printf("Program result: %d", LightExecute(byteCode));
+    }
 }
